@@ -190,6 +190,16 @@ kval *builtin_join(kval *a) {
   return x;
 }
 
+kval *builtin_len(kval *a) {
+  KDELWHENFALSE(a, a->cell[0]->type == KVAL_QEXPR, "Function 'tail' recieved incorrect type!");
+  KDELWHENFALSE(a, a->count == 1, "Function 'eval' recieved too many arguments!");
+  KDELWHENFALSE(a, a->cell[0]->count != 0, "Function 'tail' recieved {}!");
+
+  a->type = KVAL_NUM;
+  a->num = a->cell[0]->count;
+  return a;
+}
+
 kval *builtin_op(kval *a, char *op) {
   for(int i = 0; i < a->count; i++) {
     if(a->cell[i]->type != KVAL_NUM) {
@@ -237,6 +247,7 @@ kval *builtin(kval *a, char *func) {
   if(strcmp("tail", func) == 0) {return builtin_tail(a);}
   if(strcmp("join", func) == 0) {return builtin_join(a);}
   if(strcmp("eval", func) == 0) {return builtin_eval(a);}
+  if(strcmp("len", func) == 0) {return builtin_len(a);}
   if(strstr("+-/*%^", func)) {return builtin_op(a, func);};
   kval_del(a);
   return kval_err("Unknown Function!");
@@ -318,7 +329,7 @@ int main(int argc, char **argv) {
     " \
       double : /-?[0-9]+[.][0-9]+/ ; \
       number : /-?[0-9]+/ ; \
-      symbol : \"list\" | \"head\" | \"tail\" | \"join\" | \"eval\" | \
+      symbol : \"list\" | \"head\" | \"tail\" | \"join\" | \"eval\" | \"len\" | \
               '+' | '-' | '*' | '/' | '%' | '^' | ; \
       sexpr  : '(' <expr>* ')' ; \
       qexpr  : '{' <expr>* '}' ; \
