@@ -16,7 +16,7 @@ typedef struct kval {
   struct kval **cell;
 } kval;
 
-enum {KVAL_ERR, KVAL_NUM, KVAL_SYM, KVAL_SEXPR};
+enum {KVAL_ERR, KVAL_NUM, KVAL_SYM, KVAL_SEXPR, KVAL_QEXPR};
 enum {KERR_BAD_NUM, KERR_BAD_OP, KERR_DIV_ZERO};
 
 kval *kval_num(double x) {
@@ -50,6 +50,14 @@ kval *kval_sexpr(void) {
   return v;
 }
 
+kval *kval_qexpr(void) {
+  kval *v = malloc(sizeof(kval));
+  v->type = KVAL_QEXPR;
+  v->count = 0;
+  v->cell = NULL;
+  return v;
+}
+
 void kval_del(kval *v) {
   switch(v->type) {
     case KVAL_NUM:
@@ -60,6 +68,7 @@ void kval_del(kval *v) {
     case KVAL_SYM:
       free(v->sym);
       break;
+    case KVAL_QEXPR:
     case KVAL_SEXPR:
       for(int i = 0; i < v->count; i++){
         kval_del(v->cell[i]);
@@ -98,6 +107,12 @@ kval *kval_read(mpc_ast_t *t) {
     if(strcmp(t->children[i]->contents, ")") == 0) {
       continue;
     }
+    if(strcmp(t->children[i]->contents, "{") == 0) {
+      continue;
+    }
+    if(strcmp(t->children[i]->contents, "}") == 0) {
+      continue;
+    }
     if(strcmp(t->children[i]->tag, "regex") == 0) {
       continue;
     }
@@ -125,6 +140,7 @@ void print_kval(kval *v) {
     case KVAL_ERR: printf("Error: %s", v->err); break;
     case KVAL_SYM: printf("%s", v->sym); break;
     case KVAL_SEXPR: print_kval_expr(v, '(', ')'); break;
+    case KVAL_QEXPR: print_kval_expr(v, '{', '}'); break;
   }
 }
 
@@ -195,6 +211,7 @@ kval *builtin_op(kval *a, char *op) {
         x = kval_err("Can't perform Modulo (\"%\") on non Integer values!");
       }
     }
+    if(strcmp(op, "^") == 0) {x->num = pow(x->num,y->num);}
     kval_del(y);
   }
   kval_del(a);
@@ -236,6 +253,7 @@ int main(int argc, char **argv) {
   mpc_parser_t* Double = mpc_new("double");
   mpc_parser_t* Symbol = mpc_new("symbol");
   mpc_parser_t* Sexpr  = mpc_new("sexpr");
+  mpc_parser_t* Qexpr  = mpc_new("qexpr");
   mpc_parser_t* Expr   = mpc_new("expr");
   mpc_parser_t* Kek  = mpc_new("kek");
   
@@ -243,12 +261,13 @@ int main(int argc, char **argv) {
     " \
       double : /-?[0-9]+[.][0-9]+/ ; \
       number : /-?[0-9]+/ ; \
-      symbol : '+' | '-' | '*' | '/' | '%' ; \
+      symbol : '+' | '-' | '*' | '/' | '%' | '^' ; \
       sexpr  : '(' <expr>* ')' ; \
+      qexpr  : '{' <expr>* '}' ; \
       expr   : <double> | <number> | <symbol> | <sexpr> ; \
       kek  : /^/ <expr>* /$/ ; \
     ",
-    Double, Number, Symbol, Sexpr, Expr, Kek);
+    Double, Number, Symbol, Sexpr, Qexpr, Expr, Kek);
   
   puts("KekLang v0.0.3");
   puts("Press Ctrl+c to Exit\n");
@@ -271,7 +290,7 @@ int main(int argc, char **argv) {
     
   }
   
-  mpc_cleanup(6, Double, Number, Symbol, Sexpr, Expr, Kek);
+  mpc_cleanup(7, Double, Number, Symbol, Sexpr, Qexpr, Expr, Kek);
   
   return 0;
 
