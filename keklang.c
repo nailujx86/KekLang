@@ -17,7 +17,6 @@ typedef struct kval {
 } kval;
 
 enum {KVAL_ERR, KVAL_NUM, KVAL_SYM, KVAL_SEXPR, KVAL_QEXPR};
-enum {KERR_BAD_NUM, KERR_BAD_OP, KERR_DIV_ZERO};
 
 kval *kval_num(double x) {
   kval *v = malloc(sizeof(kval));
@@ -79,12 +78,6 @@ void kval_del(kval *v) {
   free(v);
 }
 
-kval *kval_read_num(mpc_ast_t *t) {
-  errno = 0;
-  double x = atof(t->contents);
-  return errno != ERANGE ? kval_num(x) : kval_err("Invalid Number!");
-}
-
 kval *kval_add(kval *v, kval *x) {
   v->count++;
   v->cell = realloc(v->cell, sizeof(kval*) * v->count);
@@ -92,32 +85,27 @@ kval *kval_add(kval *v, kval *x) {
   return v;
 }
 
-kval *kval_read(mpc_ast_t *t) {
-  if(strstr(t->tag, "number") || strstr(t->tag, "double")) {return kval_read_num(t);}
-  if(strstr(t->tag, "symbol")) {return kval_sym(t->contents);}
+kval *kval_pop(kval *v, int i) {
+  kval *x = v->cell[i];
+  memmove(&v->cell[i], &v->cell[i+1], sizeof(kval*) * (v->count-i-1));
 
-  kval *x = NULL;
-  if(strcmp(t->tag, ">") == 0) {x = kval_sexpr();}
-  if(strstr(t->tag, "sexpr")) {x = kval_sexpr();}
+  v->count--;
+  v->cell = realloc(v->cell, sizeof(kval*) * v->count);
+  
+  return x;
+}
 
-  for(int i = 0; i < t->children_num; i++) {
-    if(strcmp(t->children[i]->contents, "(") == 0) {
-      continue;
-    }
-    if(strcmp(t->children[i]->contents, ")") == 0) {
-      continue;
-    }
-    if(strcmp(t->children[i]->contents, "{") == 0) {
-      continue;
-    }
-    if(strcmp(t->children[i]->contents, "}") == 0) {
-      continue;
-    }
-    if(strcmp(t->children[i]->tag, "regex") == 0) {
-      continue;
-    }
-    x = kval_add(x, kval_read(t->children[i]));
+kval *kval_take(kval *v, int i) {
+  kval *x = kval_pop(v, i);
+  kval_del(v);
+  return x;
+}
+
+kval *kval_join(kval *x, kval *y) {
+  while(y->count) {
+    x = kval_add(x, kval_pop(y, 0));
   }
+  kval_del(y);
   return x;
 }
 
@@ -149,31 +137,56 @@ void println_kval(kval *v){
   putchar('\n');
 }
 
-int number_of_nodes(mpc_ast_t *t) {
-  if(t->children_num == 0) {return 1;}
-  if(t->children_num >=1) {
-    int nodes = 1;
-    for(int i = 0; i < t->children_num; i++){
-      nodes += number_of_nodes(t->children[i]);
-    }
-    return nodes;
+kval *kval_eval(kval *v);
+
+#define KDELWHENFALSE(args, cond, err) \
+  if (!(cond)) { kval_del(args); return kval_err(err); }
+
+kval *builtin_head(kval *a) {
+  KDELWHENFALSE(a, a->count == 1, "Function 'head' recieved too many arguments!");
+  KDELWHENFALSE(a, a->cell[0]->type == KVAL_QEXPR, "Function 'head' recieved incorrect type!");
+  KDELWHENFALSE(a, a->cell[0]->count != 0, "Function 'head' recieved {}!");
+
+  kval *v = kval_take(a, 0);
+  while(v->count > 1) {kval_del(kval_pop(v,1));}
+  return v;
+}
+
+kval *builtin_tail(kval *a) {
+  KDELWHENFALSE(a, a->count == 1, "Function 'tail' recieved too many arguments!");
+  KDELWHENFALSE(a, a->cell[0]->type == KVAL_QEXPR, "Function 'tail' recieved incorrect type!");
+  KDELWHENFALSE(a, a->cell[0]->count != 0, "Function 'tail' recieved {}!");
+
+  kval *v = kval_take(a, 0);
+  kval_del(kval_pop(v, 0));
+  return v;
+}
+
+kval *builtin_list(kval *a) {
+  a->type = KVAL_QEXPR;
+  return a;
+}
+
+kval *builtin_eval(kval *a) {
+  KDELWHENFALSE(a, a->count == 1, "Function 'eval' recieved too many arguments!");
+  KDELWHENFALSE(a, a->cell[0]->type == KVAL_QEXPR, "Function 'eval' recieved incorrect type!");
+
+  kval *x = kval_take(a, 0);
+  x->type = KVAL_SEXPR;
+  return kval_eval(x);
+}
+
+kval *builtin_join(kval *a) {
+  for(int i = 0; i < a->count; i++) {
+    KDELWHENFALSE(a, a->cell[i]->type == KVAL_QEXPR, "Function 'join' recieved incorrect type!");
   }
-  return 0;
-}
 
-kval *kval_pop(kval *v, int i) {
-  kval *x = v->cell[i];
-  memmove(&v->cell[i], &v->cell[i+1], sizeof(kval*) * (v->count-i-1));
+  kval *x = kval_pop(a, 0);
+  while(a->count) {
+    x = kval_join(x, kval_pop(a, 0));
+  }
 
-  v->count--;
-  v->cell = realloc(v->cell, sizeof(kval*) * v->count);
-  
-  return x;
-}
-
-kval *kval_take(kval *v, int i) {
-  kval *x = kval_pop(v, i);
-  kval_del(v);
+  kval_del(a);
   return x;
 }
 
@@ -218,11 +231,15 @@ kval *builtin_op(kval *a, char *op) {
   return x;
 }
 
-kval *kval_eval_sexpr(kval* v);
-
-kval *kval_eval(kval *v) {
-  if(v->type == KVAL_SEXPR) {return kval_eval_sexpr(v);}
-  return v;
+kval *builtin(kval *a, char *func) {
+  if(strcmp("list", func) == 0) {return builtin_list(a);}
+  if(strcmp("head", func) == 0) {return builtin_head(a);}
+  if(strcmp("tail", func) == 0) {return builtin_tail(a);}
+  if(strcmp("join", func) == 0) {return builtin_join(a);}
+  if(strcmp("eval", func) == 0) {return builtin_eval(a);}
+  if(strstr("+-/*%^", func)) {return builtin_op(a, func);};
+  kval_del(a);
+  return kval_err("Unknown Function!");
 }
 
 kval *kval_eval_sexpr(kval* v) {
@@ -243,9 +260,49 @@ kval *kval_eval_sexpr(kval* v) {
     return kval_err("S-expr doesn't start with a symbol!");
   }
 
-  kval *result = builtin_op(v, f->sym);
+  kval *result = builtin(v, f->sym);
   kval_del(f);
   return result;
+}
+
+kval *kval_eval(kval *v) {
+  if(v->type == KVAL_SEXPR) {return kval_eval_sexpr(v);}
+  return v;
+}
+
+kval *kval_read_num(mpc_ast_t *t) {
+  errno = 0;
+  double x = atof(t->contents);
+  return errno != ERANGE ? kval_num(x) : kval_err("Invalid Number!");
+}
+
+kval *kval_read(mpc_ast_t *t) {
+  if(strstr(t->tag, "number") || strstr(t->tag, "double")) {return kval_read_num(t);}
+  if(strstr(t->tag, "symbol")) {return kval_sym(t->contents);}
+
+  kval *x = NULL;
+  if(strcmp(t->tag, ">") == 0) {x = kval_sexpr();}
+  if(strstr(t->tag, "sexpr")) {x = kval_sexpr();}
+  if(strstr(t->tag, "qexpr")) {x = kval_qexpr();}
+  for(int i = 0; i < t->children_num; i++) {
+    if(strcmp(t->children[i]->contents, "(") == 0) {
+      continue;
+    }
+    if(strcmp(t->children[i]->contents, ")") == 0) {
+      continue;
+    }
+    if(strcmp(t->children[i]->contents, "{") == 0) {
+      continue;
+    }
+    if(strcmp(t->children[i]->contents, "}") == 0) {
+      continue;
+    }
+    if(strcmp(t->children[i]->tag, "regex") == 0) {
+      continue;
+    }
+    x = kval_add(x, kval_read(t->children[i]));
+  }
+  return x;
 }
 
 int main(int argc, char **argv) {
@@ -261,15 +318,16 @@ int main(int argc, char **argv) {
     " \
       double : /-?[0-9]+[.][0-9]+/ ; \
       number : /-?[0-9]+/ ; \
-      symbol : '+' | '-' | '*' | '/' | '%' | '^' ; \
+      symbol : \"list\" | \"head\" | \"tail\" | \"join\" | \"eval\" | \
+              '+' | '-' | '*' | '/' | '%' | '^' | ; \
       sexpr  : '(' <expr>* ')' ; \
       qexpr  : '{' <expr>* '}' ; \
-      expr   : <double> | <number> | <symbol> | <sexpr> ; \
+      expr   : <double> | <number> | <symbol> | <sexpr> | <qexpr> ; \
       kek  : /^/ <expr>* /$/ ; \
     ",
     Double, Number, Symbol, Sexpr, Qexpr, Expr, Kek);
   
-  puts("KekLang v0.0.3");
+  puts("KekLang v0.0.5");
   puts("Press Ctrl+c to Exit\n");
   
   while (1) {
