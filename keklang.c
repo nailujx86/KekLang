@@ -37,15 +37,21 @@ struct kval {
   double num;
   char *err;
   char *sym;
-  kbuiltin func;
+
+  kbuiltin builtin;
+  kenv *env;
+  kval *formals;
+  kval *body;
+
   int count;
   struct kval **cell;
 };
 
 struct kenv {
+  kenv *par;
   int count;
-  char** syms;
-  kval** vals;
+  char **syms;
+  kval **vals;
 };
 
 enum {KVAL_ERR, KVAL_NUM, KVAL_SYM, KVAL_SEXPR, KVAL_QEXPR, KVAL_FUNC};
@@ -111,7 +117,21 @@ kval *kval_qexpr(void) {
 kval *kval_func(kbuiltin function) {
   kval *v = malloc(sizeof(kval));
   v->type = KVAL_FUNC;
-  v->func = function;
+  v->builtin = function;
+  return v;
+}
+
+kenv *kenv_new(void);
+void kenv_del(kenv *e);
+kenv *kenv_copy(kenv *e);
+
+kval *kval_lambda(kval *formals, kval *body) {
+  kval *v = malloc(sizeof(kval));
+  v->type = KVAL_FUNC;
+  v->builtin = NULL;
+  v->env = kenv_new();
+  v->formals = formals;
+  v->body = body;
   return v;
 }
 
@@ -133,6 +153,11 @@ void kval_del(kval *v) {
       free(v->cell);
       break;
     case KVAL_FUNC:
+      if(!v->builtin) {
+        kenv_del(v->env);
+        kval_del(v->formals);
+        kval_del(v->body);
+      }
       break;
   }
   free(v);
@@ -173,7 +198,16 @@ kval *kval_copy(kval *v) {
   kval *x = malloc(sizeof(kval));
   x->type = v->type;
   switch(v->type){
-    case KVAL_FUNC: x->func = v->func; break;
+    case KVAL_FUNC:
+      if(v->builtin) {
+        x->builtin = v->builtin;
+      } else {
+        x->builtin = NULL;
+        x->env = kenv_copy(v->env);
+        x->formals = kval_copy(v->formals);
+        x->body = kval_copy(v->body);
+      }
+      break;
     case KVAL_NUM: x->num = v->num; break;
     case KVAL_ERR:
       x->err = malloc(strlen(v->err) + 1);
@@ -197,6 +231,7 @@ kval *kval_copy(kval *v) {
 
 kenv *kenv_new(void) {
   kenv *e = malloc(sizeof(kenv));
+  e->par = NULL;
   e->count = 0;
   e->syms = NULL;
   e->vals = NULL;
@@ -219,7 +254,12 @@ kval *kenv_get(kenv *e, kval *k) {
       return kval_copy(e->vals[i]);
     }
   }
-  return kval_err("Unbound Symbol!");
+
+  if(e->par) {
+    return kenv_get(e->par, k);
+  } else {
+    return kval_err("Unbound Symbol!");
+  }
 }
 
 void kenv_put(kenv *e, kval *k, kval *v) {
@@ -238,6 +278,25 @@ void kenv_put(kenv *e, kval *k, kval *v) {
   e->vals[e->count - 1] = kval_copy(v);
   e->syms[e->count - 1] = malloc(strlen(k->sym) + 1);
   strcpy(e->syms[e->count - 1], k->sym);
+}
+
+kenv *kenv_copy(kenv *e) {
+  kenv *n = malloc(sizeof(kenv));
+  n->par = e->par;
+  n->count = e->count;
+  n->syms = malloc(sizeof(char*) * n->count);
+  n->vals = malloc(sizeof(kval*) * n->count);
+  for(int i = 0; i < e->count; i++) {
+    n->syms[i] = malloc(strlen(e->syms[i]) + 1);
+    strcpy(n->syms[i], e->syms[i]);
+    n->vals[i] = kval_copy(e->vals[i]);
+  }
+  return n;
+}
+
+void kenv_def(kenv *e, kval *k, kval *v) {
+  while(e->par) {e = e->par;}
+  kenv_put(e,k,v);
 }
 
 void print_kval(kval *v);
@@ -260,7 +319,17 @@ void print_kval(kval *v) {
     case KVAL_SYM: printf("%s", v->sym); break;
     case KVAL_SEXPR: print_kval_expr(v, '(', ')'); break;
     case KVAL_QEXPR: print_kval_expr(v, '{', '}'); break;
-    case KVAL_FUNC: printf("<function>"); break;
+    case KVAL_FUNC:
+      if(v->builtin) {
+        printf("<builtin function>");
+      } else {
+        printf("(\\ ");
+        print_kval(v->formals);
+        putchar(' ');
+        print_kval(v->body);
+        putchar(')');
+      }
+      break;
   }
 }
 
@@ -342,9 +411,9 @@ kval *builtin_init(kenv *e ,kval *a) {
 kval *builtin_cons(kenv *e ,kval* a) {
   KDELWHENFALSE(a, a->cell[1]->type == KVAL_QEXPR, "Function 'cons' recieved incorrect type!");
   KDELWHENFALSE(a, a->count == 2, "Function 'cons' recieved too many/less arguments!");
-  kval *x = kval_pop(a, 0);
-  kval *y = kval_take(a, 0);
-  return kval_add(x, y);
+  kval *x = kval_pop(a, 1);
+  a->type = KVAL_QEXPR;
+  return kval_join(a, x);
 }
 
 kval *builtin_op(kenv *e, kval *a, char *op) {
@@ -409,22 +478,39 @@ kval *builtin_pow(kenv *e, kval *a) {
   return builtin_op(e, a, "^");
 }
 
-kval *builtin_def(kenv *e, kval *a) {
-  KDELWHENFALSE_TYPE("def", a, 0, KVAL_QEXPR);
+kval *builtin_var(kenv *e, kval *a, char *func) {
+  KDELWHENFALSE_TYPE(func, a, 0, KVAL_QEXPR);
+  
   kval *syms = a->cell[0];
 
   for(int i = 0; i < syms->count; i++) {
-    KDELWHENFALSE(a, syms->cell[i]->type == KVAL_SYM, "Function 'def' can't define non-symbol!");
+    KDELWHENFALSE(a, syms->cell[i]->type == KVAL_SYM, "Function %s can't define non-symbol! Got %s but expected %s."
+    ,func, ktype_name(syms->cell[i]->type), ktype_name(KVAL_SYM));
   }
 
-  KDELWHENFALSE(a, syms->count == a->count - 1, "Function 'def' can't define incorrect number of values to symbols!");
+  KDELWHENFALSE(a, (syms->count == a->count - 1), 
+  "Function '%s' passed too many arguments for symbols. Got %i but expected %i",
+  func, syms->count, a->count - 1);
 
   for(int i = 0; i < syms->count; i++) {
-    kenv_put(e, syms->cell[i], a->cell[i+1]);
+    if(strcmp(func, "def") == 0) {
+      kenv_def(e, syms->cell[i], a->cell[i+1]);
+    }
+    if(strcmp(func, "=") == 0) {
+      kenv_put(e, syms->cell[i], a->cell[i+1]);
+    }
   }
 
   kval_del(a);
   return kval_sexpr();
+}
+
+kval *builtin_def(kenv *e, kval* a) {
+  return builtin_var(e, a, "def");
+}
+
+kval *builtin_put(kenv *e, kval *a) {
+  return builtin_var(e, a, "=");
 }
 
 kval *builtin_exit(kenv *e, kval *a) {
@@ -450,6 +536,52 @@ kval *builtin_print_env(kenv *e, kval *a) {
   return kval_sym("END");
 }
 
+kval *builtin_lambda(kenv *e, kval *a) {
+  KDELWHENFALSE_NUM("\\", a, 2);
+  KDELWHENFALSE_TYPE("\\", a, 0, KVAL_QEXPR);
+  KDELWHENFALSE_TYPE("\\", a, 1, KVAL_QEXPR);
+  for(int i = 0; i < a->cell[0]->count; i++) {
+    KDELWHENFALSE(a, a->cell[0]->cell[i]->type == KVAL_SYM, "Can't define non-symbol. Got %s but expected %s",
+    ktype_name(a->cell[0]->cell[i]->type), ktype_name(KVAL_SYM));
+  }
+  kval *formals = kval_pop(a, 0);
+  kval *body = kval_take(a, 0);
+
+  return kval_lambda(formals, body);
+}
+
+kval *builtin_clear(kenv *e, kval *a) {
+  system("@cls||clear");
+  return kval_sexpr();
+}
+
+kval *kval_call(kenv *e, kval *f, kval *a) {
+  if(f->builtin) {
+    return f->builtin(e, a);
+  }
+  int givenargs = a->count;
+  int totalargs = f->formals->count;
+
+  while(a->count) {
+    if(f->formals->count == 0) {
+      kval_del(a);
+      return kval_err("Function passed too many arguments. Got %i but expected %i.", givenargs, totalargs);
+    }
+    kval *sym = kval_pop(f->formals, 0);
+    kval *val = kval_pop(a, 0);
+    kenv_put(f->env, sym, val);
+    kval_del(sym);
+    kval_del(val);
+  }
+  kval_del(a);
+  if(f->formals->count == 0) {
+    f->env->par = e;
+    return builtin_eval(f->env, kval_add(kval_sexpr(), kval_copy(f->body)));
+  } else {
+    return kval_copy(f);
+  }
+}
+
 void kenv_add_builtin(kenv *e, char *name, kbuiltin function) {
   kval *k = kval_sym(name);
   kval *v = kval_func(function);
@@ -470,6 +602,9 @@ void kenv_add_builtins(kenv *e) {
   kenv_add_builtin(e, "def", builtin_def);
   kenv_add_builtin(e, "exit", builtin_exit);
   kenv_add_builtin(e, "print_env", builtin_print_env);
+  kenv_add_builtin(e, "\\", builtin_lambda);
+  kenv_add_builtin(e, "=", builtin_put);
+  kenv_add_builtin(e, "clear", builtin_clear);
 
   kenv_add_builtin(e, "+", builtin_add);
   kenv_add_builtin(e, "-", builtin_sub);
@@ -493,11 +628,13 @@ kval *kval_eval_sexpr(kenv *e, kval* v) {
 
   kval *f = kval_pop(v,0);
   if(f->type != KVAL_FUNC) {
+    kval *err = kval_err("S-Expression starts with incorrect type. Got %s but expected %s.",
+    ktype_name(f->type), ktype_name(KVAL_FUNC));
     kval_del(f); kval_del(v);
-    return kval_err("First element is not a function!");
+    return err;
   }
 
-  kval *result = f->func(e, v);
+  kval *result = kval_call(e, f, v);
   kval_del(f);
   return result;
 }
