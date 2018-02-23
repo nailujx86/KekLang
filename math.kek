@@ -8,13 +8,6 @@
 //// VECTORS
 
 (func {vadd a b} {
-	list
-		(+ (fst a) (fst b))
-		(+ (snd a) (snd b))
-		(+ (trd a) (trd b))
-})
-
-(func {vadd_b a b} {
 	if (or (== a null) (== b null)) {
 		null
 	} {
