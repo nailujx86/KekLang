@@ -1,0 +1,68 @@
+(load "stdlib.kek")
+
+//// CONSTANTS
+
+(def {e} 2.7182818284)
+(def {pi} 3.1415926535)
+
+//// VECTORS
+
+(func {vadd a b} {
+	list
+		(+ (fst a) (fst b))
+		(+ (snd a) (snd b))
+		(+ (trd a) (trd b))
+})
+
+(func {vadd_b a b} {
+	if (or (== a null) (== b null)) {
+		null
+	} {
+		join
+			(list
+				(+ (eval (head a)) (eval (head b)))
+			)
+			(vadd_b (tail a) (tail b))
+	}
+})
+
+(func {vsub a b} {
+	list
+		(- (fst a) (fst b))
+		(- (snd a) (snd b))
+		(- (trd a) (trd b))
+})
+
+(func {sprod a b} {
+	+
+		(* (fst a) (fst b))
+		(* (snd a) (snd b))
+		(* (trd a) (trd b))
+})
+
+(func {smul a b} {
+	list
+		(* a (fst b))
+		(* a (snd b))
+		(* a (trd b))
+})
+
+(func {vabs a} {
+	sqrt (
+		+
+			(^ (fst a))
+			(^ (snd a))
+			(^ (trd a))
+	)
+})
+
+(func {vprod a b} {
+	if(or (!= 3 (len a)) (!= 3 (len b))) {
+		error "Cross product only applicable on 3-dimensional vectors!"
+	} {
+		list
+			(- (* (snd a) (trd b)) (* (trd a) (snd b)))
+			(- (* (trd a) (fst b)) (* (fst a) (trd b)))
+			(- (* (fst a) (snd b)) (* (snd a) (fst b)))
+	}
+})

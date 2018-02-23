@@ -1,0 +1,163 @@
+//// MAIN
+
+// Values
+(def {null} {})
+(def {true} 1)
+(def {false} 0)
+
+// Function declaration
+(def {func} (\ {args body} {
+  def (head args) (\ (tail args) body)
+}))
+
+// Packing and Unpacking
+(func {unpack function arr} {
+	eval (join (list function) arr)
+})
+(func {pack function & xs} {
+	function xs
+})
+
+// Scoping
+(func {let v} {
+ ((\ {_} v) ())
+})
+
+(func {do & l} {
+	if (== l null) {
+		null
+	} {
+		last l
+	}
+})
+
+// Logic
+(func {not x} {- 1 x})
+(func {or x y} {if (>= (+ x y) 1) {true} {false}})
+(func {and x y} {* x y})
+(func {xor x y} {or (and (not x) y) (and x (not y))})
+
+//// LISTS
+
+(func {fst l} {
+	eval (head l)
+})
+(func {snd l} {
+	eval (head (tail l))
+})
+(func {trd l} {
+	eval (head (tail (tail l)))
+})
+
+(func {len l} {
+	if(== l null) {
+		0
+	} {
+		+ 1 (len (tail l))
+	}
+})
+
+// Returns nth item of a List.
+(func {nth n l} {
+	if (== n 0) {
+		fst l
+	} {
+		nth (- n 1) (tail l)
+	}
+})
+
+(func {last l} {
+	nth (- (len l) 1) l
+})
+
+(func {take n l} {
+	if (== n 0) {
+		null
+	} {
+		join (head l) (take (- n 1) (tail l))
+	}
+})
+
+(func {drop n l} {
+	if (== n 0) {
+		l
+	} {
+		drop (- n 1) (tail l)
+	}
+})
+
+(func {split n l} {
+	list (take n l) (drop n l)
+})
+
+(func {elem x l} {
+	if (== l null) {
+		false
+	} {
+		if (== x (fst l)) {
+			true
+		} {
+			elem x (tail l)
+		}
+	}
+})
+
+// JS like Functions
+
+(func {map f l} {
+	if (== l null) {
+		null
+	} {
+		join (list (f (fst l))) (map f (tail l))
+	}
+})
+
+(func {filter f l} {
+	if (== l null) {
+		null
+	} {
+		join
+			(if (f (fst l)) {
+				head l
+			} {
+				null
+			})
+			(filter f (tail l))
+	}
+})
+
+(func {reduce f b l} {
+	if (== l null) {
+		b
+	} {
+		reduce f (f b (fst l)) (tail l)
+	}
+})
+
+//// CONDITIONALS
+
+(func {select & cs} {
+	do 
+	(= {default} true)
+	(if (== cs null) {
+		error "No Selection Found"
+	} {
+		if (fst (fst cs)) {
+			snd (fst cs)
+		} {
+			unpack select (tail cs)
+		}
+	})
+})
+
+(func {case x & cs} {
+	if (== cs null) {
+		error "No Case Found"
+	} {
+		if (== x (fst (fst cs))) {
+			snd (fst cs)
+		} {
+			unpack case (join (list x) (tail cs))
+		}
+	}
+})

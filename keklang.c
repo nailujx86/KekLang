@@ -13,6 +13,16 @@ typedef struct kval kval;
 typedef struct kenv kenv;
 static int exit_main = -1;
 
+mpc_parser_t* Number;
+mpc_parser_t* Double;
+mpc_parser_t* Symbol;
+mpc_parser_t* String;
+mpc_parser_t* Comment;
+mpc_parser_t* Sexpr;
+mpc_parser_t* Qexpr;
+mpc_parser_t* Expr;  
+mpc_parser_t* Kek; 
+
 typedef kval*(*kbuiltin)(kenv*, kval*);
 
 #define KDELWHENFALSE(args, cond, fmt, ...) \
@@ -37,6 +47,7 @@ struct kval {
   double num;
   char *err;
   char *sym;
+  char *str;
 
   kbuiltin builtin;
   kenv *env;
@@ -54,7 +65,7 @@ struct kenv {
   kval **vals;
 };
 
-enum {KVAL_ERR, KVAL_NUM, KVAL_SYM, KVAL_SEXPR, KVAL_QEXPR, KVAL_FUNC};
+enum {KVAL_ERR, KVAL_OK, KVAL_NUM, KVAL_SYM, KVAL_STR ,KVAL_SEXPR, KVAL_QEXPR, KVAL_FUNC};
 
 char* ktype_name(int t) {
   switch(t) {
@@ -64,6 +75,7 @@ char* ktype_name(int t) {
     case KVAL_SYM: return "Symbol";
     case KVAL_SEXPR: return "Expression";
     case KVAL_QEXPR: return "Quoted Expression";
+    case KVAL_STR: return "String";
     default: return "Unknown";
   }
 }
@@ -87,6 +99,14 @@ kval *kval_err(char* fmt, ...) {
   v->err = realloc(v->err, strlen(v->err) + 1);
   va_end(va);
   
+  return v;
+}
+
+kval *kval_ok(void) {
+  kval *v = malloc(sizeof(kval));
+  v->type = KVAL_OK;
+  v->count = 0;
+  v->cell = NULL;
   return v;
 }
 
@@ -121,6 +141,14 @@ kval *kval_func(kbuiltin function) {
   return v;
 }
 
+kval *kval_str(char *s) {
+  kval *v = malloc(sizeof(kval));
+  v->type = KVAL_STR;
+  v->str = malloc(strlen(s) + 1);
+  strcpy(v->str, s);
+  return v;
+}
+
 kenv *kenv_new(void);
 void kenv_del(kenv *e);
 kenv *kenv_copy(kenv *e);
@@ -145,6 +173,8 @@ void kval_del(kval *v) {
     case KVAL_SYM:
       free(v->sym);
       break;
+    case KVAL_OK:
+      break;
     case KVAL_QEXPR:
     case KVAL_SEXPR:
       for(int i = 0; i < v->count; i++){
@@ -158,6 +188,9 @@ void kval_del(kval *v) {
         kval_del(v->formals);
         kval_del(v->body);
       }
+      break;
+    case KVAL_STR:
+      free(v->str);
       break;
   }
   free(v);
@@ -217,6 +250,10 @@ kval *kval_copy(kval *v) {
       x->sym = malloc(strlen(v->sym) + 1);
       strcpy(x->sym, v->sym);
       break;
+    case KVAL_STR:
+      x->str = malloc(strlen(v->str) + 1);
+      strcpy(x->str, v->str);
+      break;
     case KVAL_SEXPR:
     case KVAL_QEXPR:
       x->count = v->count;
@@ -227,6 +264,34 @@ kval *kval_copy(kval *v) {
       break;
   }
   return x;
+}
+
+int kval_eq(kval *x, kval *y) {
+  if(x->type != y->type) {
+    return 0;
+  }
+  switch(x->type) {
+    case KVAL_NUM: return x->num == y->num; break;
+    case KVAL_ERR: return strcmp(x->err, y->err) == 0; break;
+    case KVAL_SYM: return strcmp(x->sym, y->sym) == 0; break;
+    case KVAL_STR: return strcmp(x->str, y->str) == 0; break;
+    case KVAL_FUNC:
+      if(x->builtin || y->builtin) {
+        return x->builtin == y->builtin;
+      } else {
+        return kval_eq(x->formals, y->formals) && kval_eq(x->body, y->body);
+      }
+      break;
+    case KVAL_QEXPR:
+    case KVAL_SEXPR:
+      if(x->count != y->count) {return 0;}
+      for(int i = 0; i < x->count; i++) {
+        if(!kval_eq(x->cell[i], y->cell[i])) {return 0;}
+      } 
+      return 1;
+      break;
+  }
+  return 0;
 }
 
 kenv *kenv_new(void) {
@@ -258,7 +323,7 @@ kval *kenv_get(kenv *e, kval *k) {
   if(e->par) {
     return kenv_get(e->par, k);
   } else {
-    return kval_err("Unbound Symbol!");
+    return kval_err("Unbound Symbol! (%s)", k->sym);
   }
 }
 
@@ -312,13 +377,23 @@ void print_kval_expr(kval *v, char open, char close) {
   putchar(close);
 }
 
+void print_kval_str(kval *v) {
+  char *escaped = malloc(strlen(v->str) + 1);
+  strcpy(escaped, v->str);
+  escaped = mpcf_escape(escaped);
+  printf("\"%s\"", escaped);
+  free(escaped);
+}
+
 void print_kval(kval *v) {
   switch(v->type) {
     case KVAL_NUM: printf("%g", v->num); break;
     case KVAL_ERR: printf("Error: %s", v->err); break;
     case KVAL_SYM: printf("%s", v->sym); break;
+    case KVAL_STR: print_kval_str(v); break;
     case KVAL_SEXPR: print_kval_expr(v, '(', ')'); break;
     case KVAL_QEXPR: print_kval_expr(v, '{', '}'); break;
+    case KVAL_OK: break;
     case KVAL_FUNC:
       if(v->builtin) {
         printf("<builtin function>");
@@ -339,6 +414,7 @@ void println_kval(kval *v){
 }
 
 kval *kval_eval(kenv *e, kval *v);
+kval *kval_read(mpc_ast_t *t);
 
 kval *builtin_head(kenv *e ,kval *a) {
   KDELWHENFALSE_NUM("head", a, 1);
@@ -386,16 +462,6 @@ kval *builtin_join(kenv *e ,kval *a) {
 
   kval_del(a);
   return x;
-}
-
-kval *builtin_len(kenv *e ,kval *a) {
-  KDELWHENFALSE_TYPE("len", a, 0, KVAL_QEXPR);
-  KDELWHENFALSE_NUM("len", a, 1);
-  KDELWHENFALSE_NOT_EMPTY("len", a, 0);
-
-  a->type = KVAL_NUM;
-  a->num = a->cell[0]->count;
-  return a;
 }
 
 kval *builtin_init(kenv *e ,kval *a) {
@@ -478,6 +544,13 @@ kval *builtin_pow(kenv *e, kval *a) {
   return builtin_op(e, a, "^");
 }
 
+kval *builtin_sqrt(kenv *e, kval *a) {
+  kval *x = kval_pop(a, 0);
+  x->num = sqrt(x->num);
+  kval_del(a);
+  return x;
+}
+
 kval *builtin_var(kenv *e, kval *a, char *func) {
   KDELWHENFALSE_TYPE(func, a, 0, KVAL_QEXPR);
   
@@ -552,7 +625,122 @@ kval *builtin_lambda(kenv *e, kval *a) {
 
 kval *builtin_clear(kenv *e, kval *a) {
   system("@cls||clear");
-  return kval_sexpr();
+  return kval_ok();
+}
+
+kval *builtin_compord(kenv *e, kval *a, char *op) {
+  KDELWHENFALSE_NUM(op, a, 2);
+  KDELWHENFALSE_TYPE(op, a, 0, KVAL_NUM);
+  KDELWHENFALSE_TYPE(op, a, 1, KVAL_NUM);
+  int r;
+  if(strcmp(op, "<") == 0) {
+    r = a->cell[0]->num < a->cell[1]->num;
+  }
+  if(strcmp(op, ">") == 0) {
+    r = a->cell[0]->num > a->cell[1]->num;    
+  }
+  if(strcmp(op, "<=") == 0) {
+    r = a->cell[0]->num <= a->cell[1]->num;
+  }
+  if(strcmp(op, ">=") == 0) {
+    r = a->cell[0]->num >= a->cell[1]->num;
+  }
+  kval_del(a);
+  return kval_num(r);
+}
+
+kval *builtin_lt(kenv *e, kval *a) {
+  return builtin_compord(e, a, "<");
+}
+kval *builtin_gt(kenv *e, kval *a) {
+  return builtin_compord(e, a, ">");
+}
+kval *builtin_gte(kenv *e, kval *a) {
+  return builtin_compord(e, a, ">=");
+}
+kval *builtin_lte(kenv *e, kval *a) {
+  return builtin_compord(e, a, "<=");
+}
+
+kval *builtin_compeq(kenv *e, kval *a, char *op) {
+  KDELWHENFALSE_NUM(op, a, 2);
+  int r;
+  if(strcmp(op, "==") == 0) {
+    r =  kval_eq(a->cell[0], a->cell[1]);
+  }
+  if(strcmp(op, "!=") == 0) {
+    r = !kval_eq(a->cell[0], a->cell[1]);
+  }
+  kval_del(a);
+  return kval_num(r);
+}
+
+kval *builtin_eq(kenv *e, kval *a) {
+  return builtin_compeq(e, a, "==");
+}
+
+kval *builtin_neq(kenv *e, kval *a) {
+  return builtin_compeq(e, a, "!=");
+}
+
+kval *builtin_if(kenv *e, kval *a) {
+  KDELWHENFALSE_NUM("if", a, 3);
+  KDELWHENFALSE_TYPE("if", a, 0, KVAL_NUM);
+  KDELWHENFALSE_TYPE("if", a, 1, KVAL_QEXPR);
+  KDELWHENFALSE_TYPE("if", a, 2, KVAL_QEXPR);
+  kval *x;
+  a->cell[1]->type = KVAL_SEXPR;
+  a->cell[2]->type = KVAL_SEXPR;
+  if(a->cell[0]->num) {
+    x = kval_eval(e, kval_pop(a, 1));
+  } else {
+    x = kval_eval(e, kval_pop(a, 2));
+  }
+  kval_del(a);
+  return x;
+}
+
+kval *builtin_print(kenv *e, kval *a) {
+  for(int i = 0; i < a->count; i++) {
+    print_kval(a->cell[i]);
+    putchar(' ');
+  }
+  putchar('\n');
+  kval_del(a);
+  return kval_ok();
+}
+
+kval *builtin_error(kenv *e, kval *a) {
+  KDELWHENFALSE_NUM("error", a, 1);
+  KDELWHENFALSE_TYPE("error", a, 0, KVAL_STR);
+  kval *err = kval_err(a->cell[0]->str);
+  kval_del(a);
+  return err;
+}
+
+kval *builtin_load(kenv *e, kval *a) {
+  KDELWHENFALSE_NUM("load", a, 1);
+  KDELWHENFALSE_TYPE("load", a, 0, KVAL_STR);
+  mpc_result_t r;
+  if(mpc_parse_contents(a->cell[0]->str, Kek, &r)) {
+    kval *expr = kval_read(r.output);
+    mpc_ast_delete(r.output);
+    while(expr->count) {
+      kval *x = kval_eval(e, kval_pop(expr, 0));
+      if(x->type == KVAL_ERR) {println_kval(x);}
+      kval_del(x);
+    }
+    kval_del(expr);
+    kval_del(a);
+    return kval_ok();
+  } else {
+    char *err_msg = mpc_err_string(r.error);
+    mpc_err_delete(r.error);
+    kval *err = kval_err("Couldn't load Library %s", err_msg);
+    free(err_msg);
+    kval_del(a);
+    return err;
+  }
 }
 
 kval *kval_call(kenv *e, kval *f, kval *a) {
@@ -568,12 +756,34 @@ kval *kval_call(kenv *e, kval *f, kval *a) {
       return kval_err("Function passed too many arguments. Got %i but expected %i.", givenargs, totalargs);
     }
     kval *sym = kval_pop(f->formals, 0);
+    if(strcmp(sym->sym, "&") == 0) {
+      if(f->formals->count != 1) {
+        kval_del(a);
+        return kval_err("Invalid function format. Symbol '&' should only be followed by one Symbol.");
+      }
+      kval *nsym = kval_pop(f->formals, 0);
+      kenv_put(f->env, nsym, builtin_list(e, a));
+      kval_del(sym);
+      kval_del(nsym);
+      break;
+    }
     kval *val = kval_pop(a, 0);
     kenv_put(f->env, sym, val);
     kval_del(sym);
     kval_del(val);
   }
   kval_del(a);
+  if(f->formals->count > 0 && strcmp(f->formals->cell[0]->sym, "&") == 0) {
+    if(f->formals->count != 2) {
+      return kval_err("Invalid function format. Symbol '&' should be followed by one Symbol.");
+    }
+    kval_del(kval_pop(f->formals, 0));
+    kval *sym = kval_pop(f->formals, 0);
+    kval *val = kval_qexpr();
+    kenv_put(f->env, sym, val);
+    kval_del(sym);
+    kval_del(val);
+  }
   if(f->formals->count == 0) {
     f->env->par = e;
     return builtin_eval(f->env, kval_add(kval_sexpr(), kval_copy(f->body)));
@@ -596,7 +806,6 @@ void kenv_add_builtins(kenv *e) {
   kenv_add_builtin(e, "tail", builtin_tail);
   kenv_add_builtin(e, "eval", builtin_eval);
   kenv_add_builtin(e, "join", builtin_join);
-  kenv_add_builtin(e, "len" , builtin_len);
   kenv_add_builtin(e, "init", builtin_init);
   kenv_add_builtin(e, "cons", builtin_cons);
   kenv_add_builtin(e, "def", builtin_def);
@@ -605,6 +814,10 @@ void kenv_add_builtins(kenv *e) {
   kenv_add_builtin(e, "\\", builtin_lambda);
   kenv_add_builtin(e, "=", builtin_put);
   kenv_add_builtin(e, "clear", builtin_clear);
+  kenv_add_builtin(e, "if", builtin_if);
+  kenv_add_builtin(e, "load", builtin_load);
+  kenv_add_builtin(e, "error", builtin_error);
+  kenv_add_builtin(e, "print", builtin_print);
 
   kenv_add_builtin(e, "+", builtin_add);
   kenv_add_builtin(e, "-", builtin_sub);
@@ -612,6 +825,13 @@ void kenv_add_builtins(kenv *e) {
   kenv_add_builtin(e, "/", builtin_div);
   kenv_add_builtin(e, "%", builtin_mod);
   kenv_add_builtin(e, "^", builtin_pow);
+  kenv_add_builtin(e, "sqrt", builtin_sqrt);
+  kenv_add_builtin(e, "<", builtin_lt);
+  kenv_add_builtin(e, ">", builtin_gt);
+  kenv_add_builtin(e, "<=", builtin_lte);
+  kenv_add_builtin(e, ">=", builtin_gte);
+  kenv_add_builtin(e, "==", builtin_eq);
+  kenv_add_builtin(e, "!=", builtin_neq);
 }
 
 kval *kval_eval_sexpr(kenv *e, kval* v) {
@@ -655,15 +875,28 @@ kval *kval_read_num(mpc_ast_t *t) {
   return errno != ERANGE ? kval_num(x) : kval_err("Invalid Number!");
 }
 
+kval *kval_read_str(mpc_ast_t *t) {
+  t->contents[strlen(t->contents) - 1] = '\0';
+  char *unescaped = malloc(strlen(t->contents + 1) + 1);
+  strcpy(unescaped, t->contents + 1);
+  unescaped = mpcf_unescape(unescaped);
+  kval *str = kval_str(unescaped);
+  free(unescaped);
+  return str;
+}
+
 kval *kval_read(mpc_ast_t *t) {
   if(strstr(t->tag, "number") || strstr(t->tag, "double")) {return kval_read_num(t);}
   if(strstr(t->tag, "symbol")) {return kval_sym(t->contents);}
-
+  if(strstr(t->tag, "string")) {return kval_read_str(t);}
   kval *x = NULL;
   if(strcmp(t->tag, ">") == 0) {x = kval_sexpr();}
   if(strstr(t->tag, "sexpr")) {x = kval_sexpr();}
   if(strstr(t->tag, "qexpr")) {x = kval_qexpr();}
   for(int i = 0; i < t->children_num; i++) {
+    if(strstr(t->children[i]->tag, "comment")) {
+      continue;
+    }
     if(strcmp(t->children[i]->contents, "(") == 0) {
       continue;
     }
@@ -685,56 +918,74 @@ kval *kval_read(mpc_ast_t *t) {
 }
 
 int main(int argc, char **argv) {
-  mpc_parser_t* Number = mpc_new("number");
-  mpc_parser_t* Double = mpc_new("double");
-  mpc_parser_t* Symbol = mpc_new("symbol");
-  mpc_parser_t* Sexpr  = mpc_new("sexpr");
-  mpc_parser_t* Qexpr  = mpc_new("qexpr");
-  mpc_parser_t* Expr   = mpc_new("expr");
-  mpc_parser_t* Kek  = mpc_new("kek");
+  Number = mpc_new("number");
+  Double = mpc_new("double");
+  Symbol = mpc_new("symbol");
+  String = mpc_new("string");
+  Comment = mpc_new("comment");
+  Sexpr  = mpc_new("sexpr");
+  Qexpr  = mpc_new("qexpr");
+  Expr   = mpc_new("expr");
+  Kek  = mpc_new("kek");
   
   mpca_lang(MPCA_LANG_DEFAULT,
     " \
       double : /-?[0-9]+[.][0-9]+/ ; \
       number : /-?[0-9]+/ ; \
-      symbol : /[a-zA-Z0-9_+\\-*\\/\\\\=<>!&%^]+/; \
+      string  : /\"(\\\\.|[^\"])*\"/ ; \
+      comment : /\\/\\/[^\\r\\n]*/ ; \
+      symbol : /[a-zA-Z0-9_+\\-*\\\\=<>!&%^]+/; \
       sexpr  : '(' <expr>* ')' ; \
       qexpr  : '{' <expr>* '}' ; \
-      expr   : <double> | <number> | <symbol> | <sexpr> | <qexpr> ; \
+      expr   : <double> | <number> | <symbol> | <string> | <comment> | <sexpr> | <qexpr> ; \
       kek  : /^/ <expr>* /$/ ; \
     ",
-    Double, Number, Symbol, Sexpr, Qexpr, Expr, Kek);
+    Double, Number, Symbol, String, Comment, Sexpr, Qexpr, Expr, Kek);
   
-  puts("KekLang v0.0.7");
-  puts("Press Ctrl+c to Exit\n");
   
   kenv *e = kenv_new();
   kenv_add_builtins(e);
 
-  while (1) {
-  
-    fputs("KekLang> ", stdout);
-    fgets(input, 2048, stdin);
+  if(argc == 1) {
+    puts("KekLang v0.0.7");
+    puts("Press Ctrl+c to Exit\n");
+
+    while (1) {
     
-    mpc_result_t r;
-    if (mpc_parse("<stdin>", input, Kek, &r)) {
-      kval* x = kval_eval(e, kval_read(r.output));
-      println_kval(x);
-      kval_del(x);
-      mpc_ast_delete(r.output);
-    } else {    
-      mpc_err_print(r.error);
-      mpc_err_delete(r.error);
+      fputs("KekLang> ", stdout);
+      fgets(input, 2048, stdin);
+      
+      mpc_result_t r;
+      if (mpc_parse("<stdin>", input, Kek, &r)) {
+        kval* x = kval_eval(e, kval_read(r.output));
+        println_kval(x);
+        kval_del(x);
+        mpc_ast_delete(r.output);
+      } else {    
+        mpc_err_print(r.error);
+        mpc_err_delete(r.error);
+      }
+      
+      if(exit_main != -1){
+        break;
+      }
     }
-    
-    if(exit_main != -1){
-      break;
+  }
+
+  if(argc >= 2) {
+    for(int i = 1; i < argc; i++) {
+      kval *args = kval_add(kval_sexpr(), kval_str(argv[i]));
+      kval *x = builtin_load(e, args);
+      if(x->type == KVAL_ERR) {
+        println_kval(x);
+      }
+      kval_del(x);
     }
   }
   
   puts("Terminating..");
   kenv_del(e);
-  mpc_cleanup(7, Double, Number, Symbol, Sexpr, Qexpr, Expr, Kek);
+  mpc_cleanup(9, Double, Number, Symbol,String, Comment, Sexpr, Qexpr, Expr, Kek);
   if(exit_main != -1) {
     return exit_main;
   }
