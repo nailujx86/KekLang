@@ -96,21 +96,18 @@
 	}
 })
 
-(func {variance x p e} {
+(func {variance x p} {
 	do
-		(if(== e null) {
-			= {exp} (expectancy x p)
-		} {
-			= {exp} e
-		})
-		(if(or (== x null) (== p null)) {
-			0
-		} {
-			+
-				(*
-					(^ (- (eval (head x)) exp) 2)
-					(eval (head p))
-				)
-				(variance (tail x) (tail p) exp)
-		})
+		(= {variance_calc} (\ {x p e} {
+			if (or (== x null) (== p null)) {
+				0
+			} {
+				+ 
+					(* (^ (- (eval (head x)) e) 2) 
+						(eval (head p))
+					) 
+					(variance_calc (tail x) (tail p) e)
+			}
+		}))
+		(variance_calc x p (expectancy x p))
 })
