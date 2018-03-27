@@ -7,7 +7,7 @@
 
 //// VECTORS
 
-(func {vadd a b} {
+(func {vec_add a b} {
 	if (or (== a null) (== b null)) {
 		null
 	} {
@@ -19,28 +19,28 @@
 	}
 })
 
-(func {vsub a b} {
+(func {vec_sub a b} {
 	list
 		(- (fst a) (fst b))
 		(- (snd a) (snd b))
 		(- (trd a) (trd b))
 })
 
-(func {sprod a b} {
+(func {scal_prod a b} {
 	+
 		(* (fst a) (fst b))
 		(* (snd a) (snd b))
 		(* (trd a) (trd b))
 })
 
-(func {smul a b} {
+(func {scal_mul a b} {
 	list
 		(* a (fst b))
 		(* a (snd b))
 		(* a (trd b))
 })
 
-(func {vabs a} {
+(func {vec_abs a} {
 	sqrt (
 		+
 			(^ (fst a))
@@ -49,7 +49,7 @@
 	)
 })
 
-(func {vprod a b} {
+(func {vec_prod a b} {
 	if(or (!= 3 (len a)) (!= 3 (len b))) {
 		error "Cross product only applicable on 3-dimensional vectors!"
 	} {
@@ -58,4 +58,59 @@
 			(- (* (trd a) (fst b)) (* (fst a) (trd b)))
 			(- (* (fst a) (snd b)) (* (snd a) (fst b)))
 	}
+})
+
+//// Stochastics
+
+(func {fact a} {
+	if(< a 0) {
+		error "Can't calculate the factorial of negative or non integer numbers!"
+	} {
+		if(== a 0) {
+			1
+		} {
+			* a (fact (- a 1))
+		}
+	}
+})
+
+(func {bin_coefficient a b} {
+	/ (fact a) (* (fact b) (fact (- a b))) 
+})
+
+(func {combinations a b} {
+	bin_coefficient a b
+})
+
+(func {permutations a b} {
+	/ (fact a) (fact (- a b))
+})
+
+(func {expectancy x p} {
+	if(or (== x null) (== p null)) {
+		0
+	} {
+		+
+			(* (eval (head x)) (eval (head p)))
+			(expectancy (tail x) (tail p))
+	}
+})
+
+(func {variance x p e} {
+	do
+		(if(== e null) {
+			= {exp} (expectancy x p)
+		} {
+			= {exp} e
+		})
+		(if(or (== x null) (== p null)) {
+			0
+		} {
+			+
+				(*
+					(^ (- (eval (head x)) exp) 2)
+					(eval (head p))
+				)
+				(variance (tail x) (tail p) exp)
+		})
 })

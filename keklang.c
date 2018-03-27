@@ -934,10 +934,10 @@ int main(int argc, char **argv) {
       number : /-?[0-9]+/ ; \
       string  : /\"(\\\\.|[^\"])*\"/ ; \
       comment : /\\/\\/[^\\r\\n]*/ ; \
-      symbol : /[a-zA-Z0-9_+\\-*\\\\=<>!&%^]+/; \
+      symbol : /[a-zA-Z0-9_+\\-*\\/\\\\=<>!&%^]+/; \
       sexpr  : '(' <expr>* ')' ; \
       qexpr  : '{' <expr>* '}' ; \
-      expr   : <double> | <number> | <symbol> | <string> | <comment> | <sexpr> | <qexpr> ; \
+      expr   : <double> | <number> | <comment> | <symbol> | <string> | <sexpr> | <qexpr> ; \
       kek  : /^/ <expr>* /$/ ; \
     ",
     Double, Number, Symbol, String, Comment, Sexpr, Qexpr, Expr, Kek);
