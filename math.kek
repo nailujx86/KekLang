@@ -111,3 +111,18 @@
 		}))
 		(variance_calc x p (expectancy x p))
 })
+
+(func {bin_prob n k p} {
+	*
+		(bin_coefficient n k)
+		(^ p k)
+		(^ (- 1 p) (- n k))
+})
+
+(func {bin_expectancy n p} {
+	* n p
+})
+
+(func {bin_deviation n p} {
+	sqrt (* n p (- 1 p))
+})
